@@ -39,7 +39,7 @@ CONTRACT cosale : public contract {
           *
           * @pre Transaction must have the contract account authority 
       */
-      ACTION reset();
+      ACTION reset( const uint32_t limit );
          
       /**
           * The one-time `init` action executed by the cosale contract account records
