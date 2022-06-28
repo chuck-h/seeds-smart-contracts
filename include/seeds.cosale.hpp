@@ -16,12 +16,12 @@ using std::string;
     * (e.g. COSALE) in return, 1:1 to the submitted tokens. For general participants these
     * share_tokens are freely transferrable tokens with the behavior of the standard
     * eosio.token contract.
-    * The share-of-sale tokens have an additional feature that they automatically liquidate
+    * The share_tokens have an additional feature that they automatically liquidate
     * into cash tokens (e.g. SEEDUSD), over time, as the tendered tokens are sold.
     * An account (e.g. an institutional account like milest.seeds) may be registered as
     * as special participant in the collaborative sale whose share_tokens are not
     * transferrable. A special participant may also be configured to have a sales
-    * participation ratio different from the general participants.
+    * participation ratio different from (e.g. less than) the general participants.
     **/
 
 CONTRACT cosale : public contract {
@@ -34,17 +34,21 @@ CONTRACT cosale : public contract {
         {}
 
      /**
-          * This action clears RAM tables for the contract. For a large deployment,
-          * attempting to erase all table entries in one action might fail by exceeding the
-          * chain execution time limit. The `limit` parameter protects against this. It is
-          * advisable for the application to check the contract status (get_scope) to
-          * discover whether a follow-up `reset` action is required.
+          * This test/maintenance action, executed by the contract account, clears RAM
+          * tables for the contract (except for tables scoped by account, see `resetacct`
+          * action). 
           *
-          * @param limit - max number of erasures (for time control)
-          *
-          * @pre Transaction must have the contract account authority 
       */
-      ACTION reset( const uint32_t limit );
+      ACTION reset( );
+         
+     /**
+          * This test/maintenance action, executed by the contract account, clears RAM
+          * tables associated with a specific account. Typically one would use
+          * a `cleos get scope` command to obtain the list of accounts.
+          *
+          * @param account - the account name
+      */
+      ACTION resetacct( name account );
          
       /**
           * The one-time `init` action executed by the cosale contract account records
@@ -102,7 +106,7 @@ CONTRACT cosale : public contract {
 
       /**
           * The `returns` action executed by the manager account terminates the
-          * collaborative sale and redeems all the outstanding share share tokens with
+          * collaborative sale and redeems all the outstanding share_tokens with
           * the unsold tendered tokens.
           *
       */
