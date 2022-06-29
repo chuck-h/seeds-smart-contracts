@@ -20,8 +20,8 @@ using std::string;
     * into cash tokens (e.g. SEEDUSD), over time, as the tendered tokens are sold.
     * An account (e.g. an institutional account like milest.seeds) may be registered as
     * as special participant in the collaborative sale whose share_tokens are not
-    * transferrable. A special participant may also be configured to have a sales
-    * participation ratio different from (e.g. less than) the general participants.
+    * transferrable. A special participant participates at a specified fraction of
+    * the sale, rather than pro rata.
     **/
 
 CONTRACT cosale : public contract {
@@ -139,15 +139,19 @@ CONTRACT cosale : public contract {
           * The `regspecial` action executed by the manager account
           * registers a nontransferrable cosale participant. Subsequently,
           * the participant will be unable to transfer share_tokens. Also,
-          * subsequent payout action will apply a weighting factor to
-          * the account's participation in the sale.
+          * subsequent payout action will allocate the specified fraction
+          * of the sale to special participants prior to computing the
+          * pro rata distribution to general participants.
           *
           * @param account - the account name,
-          * @param sales_ratio - the proportion at which this account participates
-          *                         in the collaborative sale,
+          * @param sales_fraction - the fraction of the total sale allocated
+                                    to this account,
           * @param memo - memo field
+          *
+          * @pre the action will be rejected if it would cause the sum of all
+          *   special account sales fractions to exceed 1.00
       */
-      ACTION regspecial(name account, float32 sales_ratio, const string& memo);
+      ACTION regspecial(name account, float32 sales_fraction, const string& memo);
 
       /**
           * The `unregspecial` action executed by the manager account removes
@@ -189,7 +193,7 @@ CONTRACT cosale : public contract {
     };
 
     TABLE special {  // singleton, scoped on account name
-       float32     sales_ratio
+       float32     sales_fraction
     };
 
     typedef eosio::multi_index< "accounts"_n, account > accounts;
