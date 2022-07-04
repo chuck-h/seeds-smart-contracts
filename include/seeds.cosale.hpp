@@ -58,9 +58,22 @@ CONTRACT cosale : public contract {
           * @param cash_token - the token which returns fiat value to the participants,
           * @param share_token - the token which represents the participant's share in the sale,
           * @param manager - an account empowered to execute administrative actions
+          * @param xfer_fee_cap - the maximum allowed transfer fee (e.g. 0.01 = 1%)
       */
       ACTION init(extended_symbol tender_token, extended_symbol cash_token,
-                  symbol share_token, name manager);
+                  symbol share_token, name manager, float32 xfer_fee_cap);
+                  
+     /**
+          * This action, executed by the manager account, sets a fee which is assessed
+          * whenever a share_token is transferred from one owner to another. 
+          * 
+          * @param xfer_fee - the fraction (e.g. 0.01 = 1%) of the sent value which
+          *                   will be burned prior to delivery of value to recipient
+          *
+          * @pre xfer_fee must not exceed the xfer_fee_cap value set in the `init` action
+      */
+      ACTION xferfee( float32 xfer_fee );
+         
          
       /**
           * The `ontransfer` action watches for blockchain transfers and triggers
@@ -126,11 +139,13 @@ CONTRACT cosale : public contract {
 
       /**
           * The `transfer` action executed by the owner of a share_token balance
-          * is used to send share_tokens from one account to another.
+          * is used to send share_tokens from one account to another. Note that if
+          * xfer_fee is non-zero, the recipient will receive a smaller quantity
+          * than the originator sends.
           *
           * @param from - the account sending tokens,
           * @param to - the account receiving tokens,
-          * @param quantity - the amount transferred,
+          * @param quantity - the amount transferred from the sender,
           * @param memo - memo field
       */
       ACTION transfer(name from, name to, asset quantity, const string& memo);
