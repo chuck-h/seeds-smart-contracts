@@ -1,12 +1,9 @@
-#ifdef FYEA1.0.0
-#include "includeseeds.rainbows.hpp"
-#else
-#include "../include/seeds.rainbows.hpp"
-#endif
-
+//#include <seeds.rainbows.hpp> // for cdt-cpp
+#include "seeds.rainbows.hpp" // for webide
 #include <algorithm>
 #include <../capi/eosio/action.h>
 
+//contractName:rainbows
 
 void rainbows::create( const name&    issuer,
                     const asset&   maximum_supply,
@@ -18,7 +15,8 @@ void rainbows::create( const name&    issuer,
                     const string&  membership_symbol,
                     const string&  broker_symbol,
                     const string&  cred_limit_symbol,
-                    const string&  pos_limit_symbol )
+                    const string&  pos_limit_symbol,
+                    const binary_extension<name>& valuation_mgr )
 {
     require_auth( issuer );
     auto sym = maximum_supply.symbol;
@@ -46,6 +44,9 @@ void rainbows::create( const name&    issuer,
     sister_check( broker_symbol, 0);
     sister_check( cred_limit_symbol, maximum_supply.symbol.precision());
     sister_check( pos_limit_symbol, maximum_supply.symbol.precision());
+    if (valuation_mgr) {
+      check( is_account( valuation_mgr.value() ), "valuation_mgr account does not exist");
+    }
     stats statstable( get_self(), sym.code().raw() );
     auto existing = statstable.find( sym.code().raw() );
     if( existing != statstable.end()) {
@@ -77,6 +78,9 @@ void rainbows::create( const name&    issuer,
        cf.broker = symbol_code( broker_symbol );
        cf.cred_limit = symbol_code( cred_limit_symbol );
        cf.positive_limit = symbol_code( pos_limit_symbol );
+       if (valuation_mgr) {
+         cf.valuation_mgr = valuation_mgr.value();
+       }
        configtable.set( cf, issuer );
     return;
     }
@@ -102,7 +106,10 @@ void rainbows::create( const name&    issuer,
        .membership = symbol_code( membership_symbol ),
        .broker = symbol_code( broker_symbol ),
        .cred_limit = symbol_code( cred_limit_symbol ),
-       .positive_limit = symbol_code( pos_limit_symbol )
+       .positive_limit = symbol_code( pos_limit_symbol ),
+       .valuation_mgr = valuation_mgr ? valuation_mgr.value() : "eosio.null"_n,
+       .val_per_token = 1.00,
+       .ref_currency = binary_extension<string>(""),
     };
     configtable.set( new_config, issuer );
     displays displaytable( get_self(), sym.code().raw() );
@@ -148,6 +155,27 @@ void rainbows::approve( const symbol_code& symbolcode, const bool& reject_and_cl
        configtable.set (cf, st.issuer );
     }
 
+}
+
+void rainbows::setvaluation( const symbol_code& symbolcode,
+                             const float& val_per_token,
+                             const string& ref_currency,
+                             const string& memo )
+{
+    auto sym_code_raw = symbolcode.raw();
+    stats statstable( get_self(), sym_code_raw );
+    const auto& st = statstable.get( sym_code_raw, "token with symbol does not exist" );
+    check( val_per_token >= 0, "valuation per token must be >=0" );
+    check( ref_currency.size() <= 64, "ref_currency designator has more than 64 bytes" );
+    check( memo.size() <= 256, "memo has more than 256 bytes" );
+    configs configtable( get_self(), sym_code_raw );
+    auto cf = configtable.get();
+    check(cf.valuation_mgr.has_value(), "setvaluation: no valuation_mgr field");
+    require_auth(cf.valuation_mgr.value());
+    
+    cf.val_per_token = val_per_token;
+    cf.ref_currency = ref_currency;
+    configtable.set( cf, cf.valuation_mgr.value() );
 }
 
 void rainbows::setbacking( const asset&    token_bucket,
@@ -369,7 +397,8 @@ void rainbows::retire( const name& owner, const asset& quantity,
 void rainbows:: garner( const name&        from,
                         const name&        to,
                         const symbol_code& symbolcode,
-                        const int64_t&     rateppm,
+                        const int64_t&     ppm_per_week,
+                        const int64_t&     ppm_abs,
                         const string&      memo )
 {
     check( is_account( from ), "from account does not exist");
@@ -381,8 +410,27 @@ void rainbows:: garner( const name&        from,
     if( fr == from_acnts.end() || fr->balance.amount <= 0) {
         return;
     }
-    check(rateppm >= 0, "garner: rateppm must be nonnegative"); // may have future use case
-    const asset quantity = asset(fr->balance.amount*(int128_t)rateppm/1000000LL, fr->balance.symbol);
+    check(ppm_per_week >= 0, "garner: ppm_per_week must be nonnegative"); // may have future use case
+    check(ppm_abs >= 0, "garner: ppm_abs must be nonnegative");
+    int64_t demurrage_ppm = 0;
+    if (ppm_per_week > 0) {
+      garnerdates gdates(get_self(), symbolcode.raw());
+      auto gd = gdates.find(from.value);
+      if (gd == gdates.end()) { // first garner action on this account/token
+        gdates.emplace( cf.withdrawal_mgr, [&]( auto& a ){
+          a.account = from;
+          a.last_garner = current_time_point();
+        });
+      } else { // compute demurrage
+        int32_t elapsed_sec = current_time_point().sec_since_epoch() - gd->last_garner.sec_since_epoch();
+        gdates.modify( gd, same_payer, [&]( auto& a ) {
+          a.last_garner = current_time_point();
+        });
+        const uint64_t secs_per_week = 7*24*60*60;
+        demurrage_ppm = elapsed_sec*(int128_t)ppm_per_week/secs_per_week;
+      } 
+    } 
+    const asset quantity = asset(fr->balance.amount*(int128_t)(demurrage_ppm+ppm_abs)/1000000LL, fr->balance.symbol);
     action(
         permission_level{cf.withdrawal_mgr,"active"_n},
         get_self(),

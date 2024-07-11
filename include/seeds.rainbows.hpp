@@ -1,6 +1,7 @@
 #pragma once
 
 #include <eosio/asset.hpp>
+#include <eosio/binary_extension.hpp>
 #include <eosio/eosio.hpp>
 #include <eosio/singleton.hpp>
 #include <eosio/system.hpp>
@@ -91,6 +92,7 @@ using namespace eosio;
           *   a positive balance in the sister token will permit a user to overspend to that amount
           * @param pos_limit_symbol - a frozen "sister" token, also managed by this contract;
           *   no user transfer is allowed to increase the user balance over the sister token balance.
+          * @param valuation_mgr - the account with authority to set valuation.
           *
           * @pre Token symbol has to be valid,
           * @pre Token symbol must not be already created, OR if it has been created,
@@ -118,7 +120,8 @@ using namespace eosio;
                         const string& membership_symbol,
                         const string& broker_symbol,
                         const string& cred_limit_symbol,
-                        const string& pos_limit_symbol );
+                        const string& pos_limit_symbol,
+                        const binary_extension<name>& valuation_mgr );
 
 
          /**
@@ -133,6 +136,45 @@ using namespace eosio;
           */
          ACTION approve( const symbol_code& symbolcode, const bool& reject_and_clear );
 
+        /**
+          * Allows `valuation_mgr` account to assign a valuation of the token with
+          * reference to another currency (e.g. USD, EUR)
+          *
+          * Note: the static function `get_valuation` returns valuation (e.g. USD per token) 
+          *
+          * @param symbolcode - the token symbol
+          * @param val_per_token - the quantity (float32) of a reference currency which is
+          *                       considered equal in value one token
+          * @param ref_currency - a string specifying the reference currency
+          *                       Most commonly this will be an ISO 4217 code, however
+          *                       interpretation of this string is the responsibility
+          *                       of a wallet or other app, not this contract.
+          * @param memo - memo string
+          *
+          */
+         ACTION setvaluation( const symbol_code& symbolcode,
+                              const float& val_per_token,
+                              const string& ref_currency,
+                              const string& memo );
+
+        /**
+          * Read the valuation (in the configured ref_currency) for a specified
+          * quantity of tokens, based on the config parameters submitted in an
+          * earlier `setvaluation` action.
+          *
+          * @param amount - the quantity of tokens
+          *
+          * @return - a 2-element structure containing
+          *           currency: the ref_currency designator (typ an ISO 4217 code)
+          *           valuation: a floating point quantity
+          */
+         struct valuation_t { string currency; float valuation; };
+
+         [[eosio::action]] valuation_t getvaluation( const asset& amount ) {
+           valuation_t rv = get_valuation( get_self(), amount.symbol.code() );
+           rv.valuation *= amount.amount / pow(10, amount.symbol.precision());
+           return rv;
+         }
 
          /**
           * Allows `issuer` account to create a backing relationship for a token. A new row in the
@@ -256,16 +298,26 @@ using namespace eosio;
                           const name&    to,
                           const asset&   quantity,
                           const string&  memo );
+         
          /**
-          * Allows `from` account to transfer to `to` account a fraction `fraction` of its balance.
+          * Allows `from` account to transfer to `to` account a fraction of its balance.
           * One account is debited and the other is credited.
+          * The transaction must be signed by the withdrawal_mgr and the
+          * `to` account must be the `withdraw_to` account.
           * This function is suitable for demurrage or wealth taxation.
           * When `from` balance is negative (e.g. mutual credit) nothing is transferred.
+          * Fractions are expressed in parts per million (ppm).
+          * For demurrage, the fraction withdrawn is proportional to the time elapsed since
+          * the previous demurrage withdrawal. The rate is expressed as `ppm_per_week`.
+          * For wealth taxation, the tax rate is expressed as `ppm_abs`.
+          * The first time a demurrage action is applied to a particular account/token,
+          * the date is registered but no transfer is made.
           *
           * @param from - the account to transfer from,
           * @param to - the account to be transferred to,
           * @param symbolcode - the token symbol,
-          * @param rateppm - the fraction (in ppm) of the `from` balance to be transferred,
+          * @param ppm_per_week - the demurrage rate in ppm per week,
+          * @param ppm_abs - the tax rate (in ppm),
           * @param memo - the memo string to accompany the transaction.
           * 
           * @pre the transaction must be authorized by the withrawal_mgr account
@@ -280,8 +332,10 @@ using namespace eosio;
          ACTION garner( const name&        from,
                         const name&        to,
                         const symbol_code& symbolcode,
-                        const int64_t&     rateppm,
+                        const int64_t&     ppm_per_week,
+                        const int64_t&     ppm_abs,
                         const string&      memo );
+         
          /**
           * Allows `ram_payer` to create an account `owner` with zero balance for
           * token `symbolcode` at the expense of `ram_payer`.
@@ -355,6 +409,17 @@ using namespace eosio;
             return ac->balance;
          }
 
+         static valuation_t get_valuation( const name& token_contract_account, const symbol_code& sym_code )
+         {
+           configs configtable( token_contract_account, sym_code.raw() );
+           check(configtable.exists(), "symbol does not exist");
+           auto cf = configtable.get();
+           if (!cf.ref_currency.has_value() || cf.ref_currency.value() == "") {
+             return {"", 0.00};
+           }
+           return {cf.ref_currency.value(), cf.val_per_token.value()};
+         }
+
       private:
          const int max_backings_count = 8; // don't use too much cpu time to complete transaction
          const uint64_t no_index = static_cast<uint64_t>(-1); // flag for nonexistent defer_table link
@@ -388,6 +453,13 @@ using namespace eosio;
             symbol_code broker;
             symbol_code cred_limit;
             symbol_code positive_limit;
+            // binary_extension<> for backward compatibility
+            binary_extension<name>
+                        valuation_mgr;
+            binary_extension<float>
+                        val_per_token;
+            binary_extension<string>
+                        ref_currency;
          };
 
          TABLE currency_display {  // singleton, scoped on token symbol code
@@ -417,6 +489,13 @@ using namespace eosio;
             uint64_t primary_key()const { return symbolcode.raw(); };
          };
 
+         TABLE garner_dates { // scoped on symbolcode
+            name  account;
+            time_point last_garner;
+
+            uint64_t primary_key()const { return account.value; };
+         };
+
          typedef eosio::multi_index< "accounts"_n, account > accounts;
          typedef eosio::multi_index< "stat"_n, currency_stats > stats;
          typedef eosio::singleton< "configs"_n, currency_config > configs;
@@ -429,8 +508,8 @@ using namespace eosio;
                >
             > backs;
          typedef eosio::multi_index< "symbols"_n, symbolt > symbols;
-
          symbols symboltable;
+         typedef eosio::multi_index< "garnerdates"_n, garner_dates > garnerdates;
 
          void sub_balance( const name& owner, const asset& value, const symbol_code& limit_symbol );
          void add_balance( const name& owner, const asset& value, const name& ram_payer,
@@ -443,9 +522,4 @@ using namespace eosio;
          void reset_one( const symbol_code symbolcode, const bool all, const uint32_t limit, uint32_t& counter );
  
    };
-
-EOSIO_DISPATCH(rainbows,
-   (create)(approve)(setbacking)(deletebacking)(setdisplay)(issue)(retire)(transfer)(garner)
-   (open)(close)(freeze)(reset)(resetacct)
-);
 

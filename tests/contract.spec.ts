@@ -1,11 +1,11 @@
 const { Blockchain, nameToBigInt, symbolCodeToBigInt, addInlinePermission,
-        expectToThrow } = require("@proton/vert");
-const { Asset, TimePoint } = require("@greymass/eosio");
+        expectToThrow } = require("@eosnetwork/vert");
+const { Asset, TimePoint, Serializer } = require("@greymass/eosio");
 const { assert, expect } = require("chai");
 const blockchain = new Blockchain()
 
 // Load contract (use paths relative to the root of the project)
-const rainbows = blockchain.createContract('rainbows', 'fyartifacts/rainbows')
+const rainbows = blockchain.createContract('rainbows', 'build/seeds.rainbows')
 const seeds = blockchain.createContract('token.seeds', 'fyartifacts/token.seeds')
 const symSEEDS = Asset.SymbolCode.from('SEEDS')
 const symTOKES = Asset.SymbolCode.from('TOKES')
@@ -31,7 +31,8 @@ async function initTOKES(starttimeString) {
     assert.deepEqual(cfg, [ { withdrawal_mgr: 'issuer', withdraw_to: 'user3', freeze_mgr: 'issuer',
         redeem_locked_until: starttimeString, config_locked_until: starttimeString,
         transfers_frozen: false, approved: true, membership: '\x00', broker: '\x00',
-        cred_limit: '\x00', positive_limit: '\x00' } ] )
+        cred_limit: '\x00', positive_limit: '\x00', valuation_mgr: 'eosio.null', val_per_token: '1.0000000',
+        ref_currency: '' } ] )
     rows = rainbows.tables.stat(symbolCodeToBigInt(symTOKES)).getTableRows()
     assert.deepEqual(rows, [ { supply: '0.00 TOKES', max_supply: '1000000.00 TOKES',
         issuer: 'issuer'  } ] )
@@ -271,14 +272,14 @@ describe('Rainbow', () => {
             rainbows.actions.retire(['user4', '20.0000 FRACS', true, 'redeemed by user']).send('user4@active'),
             "eosio_assert_message: can't redeem, escrow underfunded in SEEDS (30% reserve)" )
     });
-    it('did garner/demurrage', async () => {
+    it('did garner/tax', async () => {
         await initTOKES(starttimeString)
         await rainbows.actions.issue(['10000.00 TOKES', '']).send('issuer@active')
         await rainbows.actions.transfer(['issuer','user4', '1000.00 TOKES', '']).send('issuer@active')
         console.log('garner 1% = 10000ppm')
         // must have rainbows@eosio.code permission on withdraw_mgr accout
         addInlinePermission( 'rainbows', accounts.find( (acct) => acct.name == 'issuer').permissions )
-        await rainbows.actions.garner(['user4', 'user3', symTOKES, 10000, '']).send('issuer@active')
+        await rainbows.actions.garner(['user4', 'user3', symTOKES, 0, 10000, '']).send('issuer@active')
         balances = [ rainbows.tables.accounts([nameToBigInt('user3')]).getTableRows(),
                      rainbows.tables.accounts([nameToBigInt('user4')]).getTableRows() ]
         assert.deepEqual(balances, [ [ { balance:'10.00 TOKES' } ], [ { balance:'990.00 TOKES' } ] ] )
@@ -293,11 +294,72 @@ describe('Rainbow', () => {
         await rainbows.actions.create(['issuer', '1000000.00 TOKES', 'issuer', 'user3', 'issuer',
             starttimeString, starttimeString, '', '', 'CREDS', '']).send('issuer@active')
         await rainbows.actions.transfer(['user4', 'issuer', '1090.00 TOKES', '']).send('user4@active')
-        await rainbows.actions.garner(['user4', 'user3', symTOKES, 10000, '']).send('issuer@active')
+        await rainbows.actions.garner(['user4', 'user3', symTOKES, 0, 10000, '']).send('issuer@active')
         balances = [ rainbows.tables.accounts([nameToBigInt('user3')]).getTableRows(),
                      rainbows.tables.accounts([nameToBigInt('user4')]).getTableRows() ]
         assert.deepEqual(balances, [ [ { balance:'10.00 TOKES' } ], [ { balance:'100.00 CREDS' }, { balance:'-100.00 TOKES' } ] ] )
 
+        
+    });
+    it('did garner/demurrage', async () => {
+        await initTOKES(starttimeString)
+        await rainbows.actions.issue(['10000.00 TOKES', '']).send('issuer@active')
+        await rainbows.actions.transfer(['issuer','user4', '1000.00 TOKES', '']).send('issuer@active')
+        console.log('garner per-week; first time')
+        // must have rainbows@eosio.code permission on withdraw_mgr accout
+        addInlinePermission( 'rainbows', accounts.find( (acct) => acct.name == 'issuer').permissions )
+        await rainbows.actions.garner(['user4', 'user3', symTOKES, 10000, 0, '']).send('issuer@active')
+        balances = [ rainbows.tables.accounts([nameToBigInt('user3')]).getTableRows(),
+                     rainbows.tables.accounts([nameToBigInt('user4')]).getTableRows() ]
+        assert.deepEqual(balances, [ [ { balance:'0.00 TOKES' } ], [ { balance:'1000.00 TOKES' } ] ] )
+        console.log('garner per-week 1% = 10000ppm; after 2 weeks')
+        blockchain.setTime(TimePoint.fromMilliseconds(starttime.valueOf()+1000*60*60*24*14))  
+        addInlinePermission( 'rainbows', accounts.find( (acct) => acct.name == 'issuer').permissions )
+        await rainbows.actions.garner(['user4', 'user3', symTOKES, 10000, 0, '']).send('issuer@active')
+        balances = [ rainbows.tables.accounts([nameToBigInt('user3')]).getTableRows(),
+                     rainbows.tables.accounts([nameToBigInt('user4')]).getTableRows() ]
+        assert.deepEqual(balances, [ [ { balance:'20.00 TOKES' } ], [ { balance:'980.00 TOKES' } ] ] )
+    });
+    it('did set valuation', async () => {    
+        await rainbows.actions.create(['issuer', '100.00 TOKES', 'issuer', 'user3', 'issuer',
+            starttimeString, starttimeString, '', '', '', '', 'user5']).send('issuer@active')
+        await expectToThrow(
+            rainbows.actions.transfer(['user4', 'issuer', '50.00 TOKES', '']).send('user4@active'),
+            'eosio_assert: token has not been approved' )
+        await rainbows.actions.approve(['TOKES', false]).send('rainbows@active')
+        console.log('check valuation_mgr config')
+        cfg = rainbows.tables.configs(symbolCodeToBigInt(symTOKES)).getTableRows()
+        assert.deepEqual(cfg, [ { withdrawal_mgr: 'issuer', withdraw_to: 'user3', freeze_mgr: 'issuer',
+            redeem_locked_until: starttimeString, config_locked_until: starttimeString,
+            transfers_frozen: false, approved: true, membership: '\x00', broker: '\x00',
+            cred_limit: '\x00', positive_limit: '\x00', valuation_mgr: 'user5', val_per_token: '1.0000000',
+            ref_currency: '' } ] )
+        console.log('set valuation')
+        await expectToThrow(
+            rainbows.actions.setvaluation(['JOKES', '250', 'USD', 'memo']).send('user5@active'),
+            'eosio_assert: token with symbol does not exist' )
+        await expectToThrow(
+            rainbows.actions.setvaluation(['TOKES', '-2.50', 'USD', 'memo']).send('user5@active'),
+            'eosio_assert: valuation per token must be >=0' )
+        await expectToThrow(
+            rainbows.actions.setvaluation(['TOKES', '250',
+             'gobbledygobbledygobbledygobbledygobbledygobbledygobbledygobbledygobbledygobbledygobbledy',
+             'memo']).send('user5@active'),
+            'eosio_assert: ref_currency designator has more than 64 bytes' )
+        await expectToThrow(
+            rainbows.actions.setvaluation(['TOKES', '2.50', 'USD', 'memo']).send('issuer@active'),
+            'missing required authority user5' )
+        await rainbows.actions.setvaluation(['TOKES', '2.50', 'USD', 'memo']).send('user5@active')
+        cfg = rainbows.tables.configs(symbolCodeToBigInt(symTOKES)).getTableRows()
+        assert.deepEqual(cfg, [ { withdrawal_mgr: 'issuer', withdraw_to: 'user3', freeze_mgr: 'issuer',
+            redeem_locked_until: starttimeString, config_locked_until: starttimeString,
+            transfers_frozen: false, approved: true, membership: '\x00', broker: '\x00',
+            cred_limit: '\x00', positive_limit: '\x00', valuation_mgr: 'user5', val_per_token: '2.5000000',
+            ref_currency: 'USD' } ] )
+        await rainbows.actions.getvaluation(['10.00 TOKES']).send();
+        rvbuf = Buffer.from(blockchain.actionTraces[0].returnValue)
+        rv = Serializer.decode({data: rvbuf, type: 'valuation_t', abi: rainbows.abi})
+        assert.deepEqual(rv, {currency: 'USD', valuation: {value: 25.0}});
         
     });
 
