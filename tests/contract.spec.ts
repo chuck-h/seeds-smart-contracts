@@ -6,7 +6,7 @@ const blockchain = new Blockchain()
 
 // Load contract (use paths relative to the root of the project)
 const rainbows = blockchain.createContract('rainbows', 'build/seeds.rainbows')
-const seeds = blockchain.createContract('token.seeds', 'fyartifacts/token.seeds')
+const seeds = blockchain.createContract('token.seeds', 'build/token')
 const symSEEDS = Asset.SymbolCode.from('SEEDS')
 const symTOKES = Asset.SymbolCode.from('TOKES')
 const symCREDS = Asset.SymbolCode.from('CREDS')
