@@ -55,7 +55,7 @@ describe('Rainbow', () => {
     it('did create TOKES token', async () => {
         await initTOKES(starttimeString)
     });
-    it('did issue, transfer, withdraw, redeem fully backed token', async () => {
+    it('did issue, transfer, withdraw, redeem fully backed token, change precision', async () => {
         await initTOKES(starttimeString)
         await seeds.actions.transfer(['master','issuer','1000.0000 SEEDS','']).send('master@active')
         await expectToThrow( 
@@ -97,6 +97,15 @@ describe('Rainbow', () => {
         await rainbows.actions.deletebacking([0, symTOKES, '']).send('issuer@active')
         rows = rainbows.tables.backings([ symbolCodeToBigInt(symTOKES) ]).getTableRows()
         assert.deepEqual(rows, [ ] )
+        console.log('change precision')
+        await rainbows.actions.create(['issuer', '1000.000 TOKES', 'issuer', 'user3', 'issuer',
+            starttimeString, starttimeString, '', '', '', '', ]).send('issuer@active')
+        await rainbows.actions.issue([ '500.000 TOKES', 'issue some']).send('issuer@active')
+        rows = rainbows.tables.stat(symbolCodeToBigInt(symTOKES)).getTableRows()
+        assert.deepEqual(rows,
+           [ { supply: '500.000 TOKES', max_supply: '1000.000 TOKES', issuer: 'issuer' } ] )
+        rows = rainbows.tables.accounts([nameToBigInt('issuer')]).getTableRows()        
+        assert.deepEqual(rows, [ { balance: '500.000 TOKES'} ] )     
     });
     it('did mutual credit token', async () => {
         console.log('create CRED and TOKES tokens')

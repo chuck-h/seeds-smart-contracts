@@ -552,6 +552,7 @@ void rainbows::add_balance( const name& owner, const asset& value, const name& r
       int64_t credit_increase = std::min( to->balance.amount, 0LL ) - std::min( new_balance, 0LL );
       to_acnts.modify( to, same_payer, [&]( auto& a ) {
         a.balance.amount = new_balance;
+        a.balance.symbol = value.symbol;
       });
       stats statstable( get_self(), value.symbol.code().raw() );
       const auto& st = statstable.get( value.symbol.code().raw() );
