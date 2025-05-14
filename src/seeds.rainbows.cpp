@@ -644,13 +644,17 @@ void rainbows::reset( const bool all, const uint32_t limit )
   }
 }
   
-void rainbows::resetacct( const name& account )
+void rainbows::resetacct( const name& account, const binary_extension<symbol_code>& symcode )
 {
   require_auth2( get_self().value, "active"_n.value );
     accounts tbl(get_self(),account.value);
     auto itr = tbl.begin();
     while (itr != tbl.end()) {
-      itr = tbl.erase(itr);
+      if(!symcode || itr->balance.symbol.code() == symcode.value()) {
+        itr = tbl.erase(itr);
+      } else {
+        itr++;
+      }
     }
 }
 

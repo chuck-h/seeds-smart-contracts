@@ -58,7 +58,6 @@ beforeEach(async () => {
 describe('Rainbow', () => {
     it('did create TOKES token', async () => {
         await initTOKES(starttimeString)
-        //const result = await validator.actions.validate(['user2', 'user3', '10.00 COSEEDS', 'moomoo']).send('user2@active')
     });
     it('did issue, transfer, withdraw, redeem fully backed token, change precision', async () => {
         await initTOKES(starttimeString)
@@ -110,8 +109,34 @@ describe('Rainbow', () => {
         assert.deepEqual(rows,
            [ { supply: '500.000 TOKES', max_supply: '1000.000 TOKES', issuer: 'issuer' } ] )
         rows = rainbows.tables.accounts([nameToBigInt('issuer')]).getTableRows()        
-        assert.deepEqual(rows, [ { balance: '500.000 TOKES'} ] )     
+        assert.deepEqual(rows, [ { balance: '500.000 TOKES'} ] )  
     });
+        it('did reset account', async () => {
+        await initTOKES(starttimeString)
+        console.log('issue TOKES, CREDS, & PROPS')
+        await rainbows.actions.issue([ '500.00 TOKES', 'issue some']).send('issuer@active')
+        await rainbows.actions.create(['issuer', '1000000.0000 CREDS', 'issuer', 'user3', 'issuer',
+                     starttimeString, starttimeString, '', '', '', '', ]).send('issuer@active')
+        await rainbows.actions.approve(['CREDS', false]).send('rainbows@active')
+        await rainbows.actions.issue([ '500.0000 CREDS', 'issue some']).send('issuer@active')
+        await rainbows.actions.create(['issuer', '1000000.0000 PROPS', 'issuer', 'user3', 'issuer',
+                     starttimeString, starttimeString, '', '', '', '', ]).send('issuer@active')
+        await rainbows.actions.approve(['PROPS', false]).send('rainbows@active')
+        await rainbows.actions.issue([ '500.0000 PROPS', 'issue some']).send('issuer@active')
+        rows = rainbows.tables.accounts([nameToBigInt('issuer')]).getTableRows()        
+        assert.deepEqual(rows, [ { balance: '500.0000 CREDS'}, { balance: '500.00 TOKES'}, { balance: '500.0000 PROPS'} ] )  
+        await rainbows.actions.retire(['issuer', '500.00 TOKES', true, 'redeemed']).send('issuer@active')
+        console.log('reset TOKES only')
+        await rainbows.actions.resetacct(['issuer', symTOKES]).send('rainbows@active')
+        rows = rainbows.tables.accounts([nameToBigInt('issuer')]).getTableRows()        
+        assert.deepEqual(rows, [ { balance: '500.0000 CREDS'}, { balance: '500.0000 PROPS'} ] )
+        console.log('reset all')
+        await rainbows.actions.resetacct(['issuer']).send('rainbows@active')
+        rows = rainbows.tables.accounts([nameToBigInt('issuer')]).getTableRows()        
+        assert.deepEqual(rows, [ ] )
+        
+    });
+        
     it('did mutual credit token', async () => {
         console.log('create CRED and TOKES tokens')
         await rainbows.actions.create(['issuer', '1000000.00 CREDS', 'issuer', 'user3', 'issuer',

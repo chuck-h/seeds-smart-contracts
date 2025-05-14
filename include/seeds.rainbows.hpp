@@ -399,7 +399,7 @@ using namespace eosio;
           *
           * @pre Transaction must have the contract account authority 
           */
-         ACTION resetacct( const name& account );
+         ACTION resetacct( const name& account, const binary_extension<symbol_code>& symcode );
 
          static asset get_balance( const name& token_contract_account, const name& owner, const symbol_code& sym_code )
          {
