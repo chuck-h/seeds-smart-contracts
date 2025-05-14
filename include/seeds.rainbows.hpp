@@ -392,10 +392,11 @@ using namespace eosio;
          ACTION reset( const bool all, const uint32_t limit );
 
          /**
-          * This action clears the `accounts` table for a particular account. All
-          * token balances in the account are erased.
+          * This action removes a token balance from the `accounts` table for a particular account.
+          * If no token is specified, all token balances in the account are erased.
           *
           * @param account - account
+          * @param symcode - token symbol to remove (optional)
           *
           * @pre Transaction must have the contract account authority 
           */
