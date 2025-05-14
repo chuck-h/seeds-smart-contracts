@@ -93,6 +93,7 @@ using namespace eosio;
           * @param pos_limit_symbol - a frozen "sister" token, also managed by this contract;
           *   no user transfer is allowed to increase the user balance over the sister token balance.
           * @param valuation_mgr - the account with authority to set valuation.
+          * @param validator - an external contract to call inline to validate each transfer.
           *
           * @pre Token symbol has to be valid,
           * @pre Token symbol must not be already created, OR if it has been created,
@@ -121,7 +122,8 @@ using namespace eosio;
                         const string& broker_symbol,
                         const string& cred_limit_symbol,
                         const string& pos_limit_symbol,
-                        const binary_extension<name>& valuation_mgr );
+                        const binary_extension<name>& valuation_mgr,
+                        const binary_extension<name>& validator );
 
 
          /**
@@ -460,6 +462,8 @@ using namespace eosio;
                         val_per_token;
             binary_extension<string>
                         ref_currency;
+            binary_extension<name>
+                        validator;
          };
 
          TABLE currency_display {  // singleton, scoped on token symbol code

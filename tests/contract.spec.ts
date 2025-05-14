@@ -7,6 +7,8 @@ const blockchain = new Blockchain()
 // Load contract (use paths relative to the root of the project)
 const rainbows = blockchain.createContract('rainbows', 'build/seeds.rainbows')
 const seeds = blockchain.createContract('token.seeds', 'build/token')
+const validator = blockchain.createContract('validator', '../biofi-smart-contracts/build/validator')
+    addInlinePermission( 'rainbows', validator.permissions )
 const symSEEDS = Asset.SymbolCode.from('SEEDS')
 const symTOKES = Asset.SymbolCode.from('TOKES')
 const symCREDS = Asset.SymbolCode.from('CREDS')
@@ -24,14 +26,15 @@ async function initSEEDS() {
 }
 async function initTOKES(starttimeString) {
     await rainbows.actions.create(['issuer', '1000000.00 TOKES', 'issuer', 'user3', 'issuer',
-                     starttimeString, starttimeString, '', '', '', '', ]).send('issuer@active')
+                     starttimeString, starttimeString, '', '', '', '', 'issuer','validator']).send('issuer@active')
     await rainbows.actions.approve(['TOKES', false]).send('rainbows@active')
                      
     const cfg = rainbows.tables.configs(symbolCodeToBigInt(symTOKES)).getTableRows()
     assert.deepEqual(cfg, [ { withdrawal_mgr: 'issuer', withdraw_to: 'user3', freeze_mgr: 'issuer',
         redeem_locked_until: starttimeString, config_locked_until: starttimeString,
         transfers_frozen: false, approved: true, membership: '\x00', broker: '\x00',
-        cred_limit: '\x00', positive_limit: '\x00', valuation_mgr: 'eosio.null', val_per_token: '1.0000000',
+        cred_limit: '\x00', positive_limit: '\x00', valuation_mgr: 'issuer', val_per_token: '1.0000000',
+        validator: 'validator',
         ref_currency: '' } ] )
     rows = rainbows.tables.stat(symbolCodeToBigInt(symTOKES)).getTableRows()
     assert.deepEqual(rows, [ { supply: '0.00 TOKES', max_supply: '1000000.00 TOKES',
@@ -48,12 +51,14 @@ beforeEach(async () => {
     starttimeString = starttime.toISOString().slice(0, -1);
 
     await initSEEDS()
+
 })
 
 /* Tests */
 describe('Rainbow', () => {
     it('did create TOKES token', async () => {
         await initTOKES(starttimeString)
+        //const result = await validator.actions.validate(['user2', 'user3', '10.00 COSEEDS', 'moomoo']).send('user2@active')
     });
     it('did issue, transfer, withdraw, redeem fully backed token, change precision', async () => {
         await initTOKES(starttimeString)
@@ -73,12 +78,12 @@ describe('Rainbow', () => {
         await rainbows.actions.open(['user3', symTOKES, 'issuer']).send('issuer@active') // withdraw_to
         await rainbows.actions.open(['user4', symTOKES, 'issuer']).send('issuer@active')
         console.log('transfer')
-        await rainbows.actions.transfer(['issuer','user4','100.00 TOKES', '']).send('issuer@active')
+        await rainbows.actions.transfer(['issuer','user4','100.00 TOKES', 'beans']).send('issuer@active')
         await expectToThrow(
             rainbows.actions.transfer(['user4', 'issuer', '80.00 TOKES', '']).send('issuer@active'),
             'missing required authority user4' )
         console.log('withdraw')
-        await rainbows.actions.transfer(['user4', 'user3', '80.00 TOKES', '']).send('issuer@active') // user3 = withdraw_to 
+        await rainbows.actions.transfer(['user4', 'user3', '80.00 TOKES', 'beans']).send('issuer@active') // user3 = withdraw_to 
         balances = [ seeds.tables.accounts([nameToBigInt('escrow')]).getTableRows(),
                      rainbows.tables.accounts([nameToBigInt('user4')]).getTableRows() ]
         assert.deepEqual(balances, [ [ { balance: '200.0000 SEEDS'} ], [ { balance: '20.00 TOKES'} ] ] )
@@ -89,8 +94,8 @@ describe('Rainbow', () => {
         await rainbows.actions.retire(['user4', '20.00 TOKES', true, 'redeemed by user']).send('user4@active')
         await rainbows.actions.retire(['user3', '80.00 TOKES', true, 'redeemed by user']).send('user3@active')
         await rainbows.actions.retire(['issuer', '400.00 TOKES', true, 'redeemed by isuer']).send('issuer@active')
-        await seeds.actions.transfer(['user4', 'issuer', '8.0000 SEEDS', '']).send('user4@active')
-        await seeds.actions.transfer(['user3', 'issuer', '32.0000 SEEDS', '']).send('user3@active')
+        await seeds.actions.transfer(['user4', 'issuer', '8.0000 SEEDS', 'corn']).send('user4@active')
+        await seeds.actions.transfer(['user3', 'issuer', '32.0000 SEEDS', 'fish']).send('user3@active')
         rows = seeds.tables.accounts([nameToBigInt('issuer')]).getTableRows()        
         assert.deepEqual(rows, [ { balance: '1000.0000 SEEDS'} ] )
         console.log('delete backing')
@@ -284,11 +289,11 @@ describe('Rainbow', () => {
     it('did garner/tax', async () => {
         await initTOKES(starttimeString)
         await rainbows.actions.issue(['10000.00 TOKES', '']).send('issuer@active')
-        await rainbows.actions.transfer(['issuer','user4', '1000.00 TOKES', '']).send('issuer@active')
+        await rainbows.actions.transfer(['issuer','user4', '1000.00 TOKES', 'massage']).send('issuer@active')
         console.log('garner 1% = 10000ppm')
         // must have rainbows@eosio.code permission on withdraw_mgr accout
         addInlinePermission( 'rainbows', accounts.find( (acct) => acct.name == 'issuer').permissions )
-        await rainbows.actions.garner(['user4', 'user3', symTOKES, 0, 10000, '']).send('issuer@active')
+        await rainbows.actions.garner(['user4', 'user3', symTOKES, 0, 10000, 'massage']).send('issuer@active')
         balances = [ rainbows.tables.accounts([nameToBigInt('user3')]).getTableRows(),
                      rainbows.tables.accounts([nameToBigInt('user4')]).getTableRows() ]
         assert.deepEqual(balances, [ [ { balance:'10.00 TOKES' } ], [ { balance:'990.00 TOKES' } ] ] )
@@ -302,7 +307,7 @@ describe('Rainbow', () => {
         await rainbows.actions.transfer(['issuer', 'user4', '100.00 CREDS', '']).send('issuer@active')
         await rainbows.actions.create(['issuer', '1000000.00 TOKES', 'issuer', 'user3', 'issuer',
             starttimeString, starttimeString, '', '', 'CREDS', '']).send('issuer@active')
-        await rainbows.actions.transfer(['user4', 'issuer', '1090.00 TOKES', '']).send('user4@active')
+        await rainbows.actions.transfer(['user4', 'issuer', '1090.00 TOKES', 'music']).send('user4@active')
         await rainbows.actions.garner(['user4', 'user3', symTOKES, 0, 10000, '']).send('issuer@active')
         balances = [ rainbows.tables.accounts([nameToBigInt('user3')]).getTableRows(),
                      rainbows.tables.accounts([nameToBigInt('user4')]).getTableRows() ]
@@ -313,18 +318,18 @@ describe('Rainbow', () => {
     it('did garner/demurrage', async () => {
         await initTOKES(starttimeString)
         await rainbows.actions.issue(['10000.00 TOKES', '']).send('issuer@active')
-        await rainbows.actions.transfer(['issuer','user4', '1000.00 TOKES', '']).send('issuer@active')
+        await rainbows.actions.transfer(['issuer','user4', '1000.00 TOKES', 'bedsheets']).send('issuer@active')
         console.log('garner per-week; first time')
         // must have rainbows@eosio.code permission on withdraw_mgr accout
         addInlinePermission( 'rainbows', accounts.find( (acct) => acct.name == 'issuer').permissions )
-        await rainbows.actions.garner(['user4', 'user3', symTOKES, 10000, 0, '']).send('issuer@active')
+        await rainbows.actions.garner(['user4', 'user3', symTOKES, 10000, 0, 'tankards']).send('issuer@active')
         balances = [ rainbows.tables.accounts([nameToBigInt('user3')]).getTableRows(),
                      rainbows.tables.accounts([nameToBigInt('user4')]).getTableRows() ]
         assert.deepEqual(balances, [ [ { balance:'0.00 TOKES' } ], [ { balance:'1000.00 TOKES' } ] ] )
         console.log('garner per-week 1% = 10000ppm; after 2 weeks')
         blockchain.setTime(TimePoint.fromMilliseconds(starttime.valueOf()+1000*60*60*24*14))  
         addInlinePermission( 'rainbows', accounts.find( (acct) => acct.name == 'issuer').permissions )
-        await rainbows.actions.garner(['user4', 'user3', symTOKES, 10000, 0, '']).send('issuer@active')
+        await rainbows.actions.garner(['user4', 'user3', symTOKES, 10000, 0, 'blessing']).send('issuer@active')
         balances = [ rainbows.tables.accounts([nameToBigInt('user3')]).getTableRows(),
                      rainbows.tables.accounts([nameToBigInt('user4')]).getTableRows() ]
         assert.deepEqual(balances, [ [ { balance:'20.00 TOKES' } ], [ { balance:'980.00 TOKES' } ] ] )
@@ -342,6 +347,7 @@ describe('Rainbow', () => {
             redeem_locked_until: starttimeString, config_locked_until: starttimeString,
             transfers_frozen: false, approved: true, membership: '\x00', broker: '\x00',
             cred_limit: '\x00', positive_limit: '\x00', valuation_mgr: 'user5', val_per_token: '1.0000000',
+            validator: '',
             ref_currency: '' } ] )
         console.log('set valuation')
         await expectToThrow(
@@ -364,6 +370,7 @@ describe('Rainbow', () => {
             redeem_locked_until: starttimeString, config_locked_until: starttimeString,
             transfers_frozen: false, approved: true, membership: '\x00', broker: '\x00',
             cred_limit: '\x00', positive_limit: '\x00', valuation_mgr: 'user5', val_per_token: '2.5000000',
+            validator: '',
             ref_currency: 'USD' } ] )
         await rainbows.actions.getvaluation(['10.00 TOKES']).send();
         rvbuf = Buffer.from(blockchain.actionTraces[0].returnValue)

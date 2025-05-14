@@ -16,7 +16,8 @@ void rainbows::create( const name&    issuer,
                     const string&  broker_symbol,
                     const string&  cred_limit_symbol,
                     const string&  pos_limit_symbol,
-                    const binary_extension<name>& valuation_mgr )
+                    const binary_extension<name>& valuation_mgr,
+                    const binary_extension<name>& validator )
 {
     require_auth( issuer );
     auto sym = maximum_supply.symbol;
@@ -44,8 +45,11 @@ void rainbows::create( const name&    issuer,
     sister_check( broker_symbol, 0);
     sister_check( cred_limit_symbol, maximum_supply.symbol.precision());
     sister_check( pos_limit_symbol, maximum_supply.symbol.precision());
-    if (valuation_mgr) {
+    if (valuation_mgr && valuation_mgr.value()!=""_n) {
       check( is_account( valuation_mgr.value() ), "valuation_mgr account does not exist");
+    }
+    if (validator && validator.value()!=""_n) {
+      check( is_account(validator.value()) && get_code_hash(validator.value())!=checksum256(), validator.value().to_string()+": no validator contract");
     }
     stats statstable( get_self(), sym.code().raw() );
     auto existing = statstable.find( sym.code().raw() );
@@ -81,6 +85,9 @@ void rainbows::create( const name&    issuer,
        if (valuation_mgr) {
          cf.valuation_mgr = valuation_mgr.value();
        }
+       if (validator) {
+         cf.validator = validator.value();
+       }
        configtable.set( cf, issuer );
     return;
     }
@@ -107,7 +114,8 @@ void rainbows::create( const name&    issuer,
        .broker = symbol_code( broker_symbol ),
        .cred_limit = symbol_code( cred_limit_symbol ),
        .positive_limit = symbol_code( pos_limit_symbol ),
-       .valuation_mgr = valuation_mgr ? valuation_mgr.value() : "eosio.null"_n,
+       .valuation_mgr = valuation_mgr ? valuation_mgr.value() : ""_n,
+       .validator = validator ? validator.value() : ""_n,
        .val_per_token = 1.00,
        .ref_currency = binary_extension<string>(""),
     };
@@ -170,7 +178,7 @@ void rainbows::setvaluation( const symbol_code& symbolcode,
     check( memo.size() <= 256, "memo has more than 256 bytes" );
     configs configtable( get_self(), sym_code_raw );
     auto cf = configtable.get();
-    check(cf.valuation_mgr.has_value(), "setvaluation: no valuation_mgr field");
+    check(cf.valuation_mgr.has_value() && cf.valuation_mgr.value()!=""_n, "setvaluation: no valuation_mgr field");
     require_auth(cf.valuation_mgr.value());
     
     cf.val_per_token = val_per_token;
@@ -439,6 +447,7 @@ void rainbows:: garner( const name&        from,
       ).send();
 }
 
+
 void rainbows::transfer( const name&    from,
                       const name&    to,
                       const asset&   quantity,
@@ -489,11 +498,19 @@ void rainbows::transfer( const name&    from,
     const auto& st2 = statstable2.get( sym_code_raw );
     check( st2.max_supply.amount >= st2.supply.amount, "new credit exceeds available supply");
 
+    if (cf.validator.has_value() && cf.validator.value()!=""_n) {
+       action(
+          permission_level{cf.validator.value(), "active"_n},
+          cf.validator.value(), 
+          "validate"_n,
+          std::make_tuple(from, to, quantity, memo)
+       ).send();
+    }
+
 }
 
 void rainbows::sub_balance( const name& owner, const asset& value, const symbol_code& limit_symbol ) {
    accounts from_acnts( get_self(), owner.value );
-
    int64_t limit = 0;
    if( limit_symbol != symbol_code(0) ) {
       auto cred = from_acnts.find( limit_symbol.raw() );
